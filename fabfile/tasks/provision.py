@@ -3547,3 +3547,972 @@ def setup_zones():
     setup_esx_zone()
 #end setup_zones
 
+
+from fabfile.tasks.vcenter_prov import vcenter_base
+
+@task
+@roles('webui')
+def poweron_vfw(vfw_name,vcenter_user,vcenter_password):
+
+    print "vfw_name:", vfw_name
+    print "user:",     vcenter_user
+    print "pwd:",      vcenter_password
+
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+    for v in vcenter_info.keys():
+        vcenter_server = vcenter_info[v]
+        break 
+  
+    vcenter_base_params = {}
+    vcenter_base_params['vcenter_server'] = vcenter_server['server']
+    vcenter_base_params['vcenter_username'] = vcenter_user
+    vcenter_base_params['vcenter_password'] = vcenter_password
+    vcenter = vcenter_base(vcenter_base_params)
+
+    try:
+        vcenter.connect_to_vcenter()
+    except Exception,e:
+        print "Got connect_to_vcenter exception:",e
+        print "magicdelete connecterror",vfw_name
+        return
+
+    vcontent = vcenter.service_instance.content
+    
+    for i in range(0,360):
+        excep = 0
+        try:
+            vm = vcenter.get_obj([vcenter.pyVmomi.vim.VirtualMachine], vfw_name)
+            excep = 0
+        except Exception,e:
+            print "Got get_obj exception:",e
+            excep = 1
+        if excep == 1:
+            sleep(1)
+            continue
+        else: 
+            break
+
+    if i >= 360:
+        print "poweron busyerror",vfw_name
+        return
+
+    if vm is None:
+        print "poweron notfound",vfw_name
+        return
+
+    if vm.runtime.powerState == "poweredOff":
+        print "Attempting to power on:%s" %vfw_name 
+        task = vm.PowerOnVM_Task()
+        vcenter.wait_for_task(task, vcenter.service_instance)
+        print "poweron success",vfw_name
+    else:
+        print "poweron alreadyon",vfw_name
+    
+    return 
+ 
+@task
+@roles('webui')
+def poweroff_vfw(vfw_name,vcenter_user,vcenter_password):
+
+    print "vfw_name:", vfw_name
+    print "user:",     vcenter_user
+    print "pwd:",      vcenter_password
+
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+    for v in vcenter_info.keys():
+        vcenter_server = vcenter_info[v]
+        break 
+  
+    vcenter_base_params = {}
+    vcenter_base_params['vcenter_server'] = vcenter_server['server']
+    vcenter_base_params['vcenter_username'] = vcenter_user
+    vcenter_base_params['vcenter_password'] = vcenter_password
+    vcenter = vcenter_base(vcenter_base_params)
+
+    try:
+        vcenter.connect_to_vcenter()
+    except Exception,e:
+        print "Got connect_to_vcenter exception:",e
+        print "magicdelete connecterror",vfw_name
+        return
+
+    vcontent = vcenter.service_instance.content
+    
+    for i in range(0,360):
+        excep = 0
+        try:
+            vm = vcenter.get_obj([vcenter.pyVmomi.vim.VirtualMachine], vfw_name)
+            excep = 0
+        except Exception,e:
+            print "Got get_obj exception:",e
+            excep = 1
+        if excep == 1:
+            sleep(1)
+            continue
+        else: 
+            break
+
+    if i >= 360:
+        print "poweroff busyerror",vfw_name
+        return
+
+    if vm is None:
+        print "poweroff notfound",vfw_name
+        return
+
+    if vm.runtime.powerState == "poweredOn":
+        print "Attempting to power off:%s" %vfw_name 
+        task = vm.PowerOffVM_Task()
+        vcenter.wait_for_task(task, vcenter.service_instance)
+        print "poweroff success",vfw_name
+    else:
+        print "poweroff alreadyoff",vfw_name
+    
+    return 
+
+
+@task
+@roles('webui')
+def reboot_vfw(vfw_name,vcenter_user,vcenter_password):
+
+    print "vfw_name:", vfw_name
+    print "user:",     vcenter_user
+    print "pwd:",      vcenter_password
+
+    poweron_vfw(vfw_name,vcenter_user,vcenter_password)
+    sleep(5)
+    poweroff_vfw(vfw_name,vcenter_user,vcenter_password)
+    sleep(5)
+    poweron_vfw(vfw_name,vcenter_user,vcenter_password)
+
+    return
+
+
+@task
+@roles('webui')
+def renamevrouter(name="vRouterVM"):
+
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+    for v in vcenter_info.keys():
+        vcenter_server = vcenter_info[v]
+        break
+
+    vcenter_base_params = {}
+    vcenter_base_params['vcenter_server'] = vcenter_server['server']
+    vcenter_base_params['vcenter_username'] = vcenter_server['username']
+    vcenter_base_params['vcenter_password'] = vcenter_server['password']
+    vcenter = vcenter_base(vcenter_base_params)
+    vcenter.connect_to_vcenter()
+    vcontent = vcenter.service_instance.content
+
+    esxi_info = getattr(testbed, 'esxi_hosts', None)
+    esxi_host_list = esxi_info.keys()
+    for host in esxi_host_list:
+        esxi_host = esxi_info[host]
+        vm_name = "ContrailVM" + "-" + vcenter_server['datacenter'] + "-" + esxi_host['ip']
+        vm_obj = None
+        for i in (0,60):
+            vm_obj = vcenter.get_obj([vcenter.pyVmomi.vim.VirtualMachine], vm_name)
+            if type(vm_obj) != type(None):
+                break
+            sleep(1)
+        if type(vm_obj) == type(None):
+            print "Can't get vm:%s from vcenter:%s" %(vm_name, vcenter_server['server'])
+            continue
+        else:
+            new_name = name + "-" + vcenter_server['datacenter'] + "-" + esxi_host['ip']
+            task = vm_obj.Rename_Task(new_name)
+            vcenter.wait_for_task(task, vcenter.service_instance)  
+    return
+
+def reconnect_vc(content,user,pwd):
+    if content.sessionManager.currentSession is None:
+        print "Current session is none, we will reconnect."
+        content.sessionManager.Login(user,pwd) 
+
+@task
+@roles('webui')
+def prov_vfw(esxi_ip,vfw_name,net1, net2, net3, \
+             vcenter_user,vcenter_password,numvcpus,memsizeGB,cpuLimitedMHZ):
+    print "esxi_ip:",  esxi_ip
+    print "vfw_name:", vfw_name
+    print "net1:",     net1
+    print "net2:",     net2
+    print "net3:",     net3
+    print "user:",     vcenter_user
+    print "pwd:",      vcenter_password
+    print "numvcpus:", numvcpus
+    print "memsizeGB:", memsizeGB
+    print "cpuLimitedMHZ:",cpuLimitedMHZ
+ 
+    memsize = int(memsizeGB) * 1024
+
+    esxi_info = getattr(testbed, 'esxi_hosts', None)
+    esxi_host_list = esxi_info.keys()
+    for host in esxi_host_list:
+        if esxi_info[host]['ip'] == esxi_ip:
+            esxi_host = esxi_info[host]
+            break
+    if esxi_info[host]['ip'] != esxi_ip:
+        print "Can't find IP:%s in testbed.py esxi_hosts blok" %esxi_ip
+        return
+   
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+
+    for v in vcenter_info.keys():
+
+        vcenter_server = vcenter_info[v]
+        vcenter_server['username'] = vcenter_user
+        vcenter_server['password'] = vcenter_password
+        break   
+    vcenter_base_params = {}
+    vcenter_base_params['vcenter_server'] = vcenter_server['server']
+    vcenter_base_params['vcenter_username'] = vcenter_server['username']
+    vcenter_base_params['vcenter_password'] = vcenter_server['password']
+    vcenter = vcenter_base(vcenter_base_params)
+  
+    try: 
+        vcenter.connect_to_vcenter()
+    except Exception,e:
+        print "Got connect_to_vcenter exception:",e
+        print "magiccreate connecterror",vfw_name
+        return
+
+    vcontent = vcenter.service_instance.content
+
+    for dc in vcontent.rootFolder.childEntity:
+        if dc.name == vcenter_info[v]['datacenter']:
+            break
+
+    for cluster in dc.hostFolder.childEntity:
+        if cluster.name == esxi_info[host]['cluster']:
+            break
+
+    for host in cluster.host:
+        if host.name == esxi_ip:
+            break
+
+    availMem = cluster.resourcePool.summary.runtime.memory.unreservedForVm
+    print "availMem:",availMem
+    
+    if (long(memsizeGB) + 1) * 1024 * 1024 * 1024 > long(availMem):
+        print "magiccreate memoryerror",vfw_name
+        return
+
+    #find maximum free space datastore 
+    maxds_size = 0
+    maxds_name = ''
+    maxds_path   = ''
+    for datastore in host.datastore:
+        ds_size = datastore.summary.freeSpace
+        ds_name = datastore.summary.name
+        ds_path = datastore.summary.url.split("ds://")[1]
+        if ds_size > maxds_size:
+           maxds_size = ds_size
+           maxds_name = ds_name
+           maxds_path = ds_path
+   
+    rp = cluster.resourcePool
+    print maxds_name,maxds_path
+
+    #create vmx file from template on the bottom of file
+    template_vals = { '__vm_name__' : vfw_name,
+                      '__hw_version__' : 8,
+                      '__numvcpus__':numvcpus,
+                      '__memsize__':memsize,
+                      '__cpumax__':cpuLimitedMHZ,
+                    }
+    _, vmx_file = tempfile.mkstemp(prefix=vfw_name)
+    data = vfw_vmx_template.safe_substitute(template_vals)
+
+    outfile = open(vmx_file, 'w') 
+    outfile.write(data)
+    outfile.close()
+    print "VMX File %s created for VM %s" %(vmx_file, vfw_name)
+
+    webui_vmdk     = "/root/opzoonvfw.vmdk"
+    webui_vmdk_out = run("ls -l %s | awk \'{print $5}\'" %webui_vmdk)
+    if webui_vmdk_out.isdigit():
+        webui_vmdk_len = int(webui_vmdk_out)
+    else:
+        webui_vmdk_len = 0
+    print "The length of vmdk in WebUI:",webui_vmdk_len
+    
+    datastore = esxi_host['datastore']
+    with settings(host_string = esxi_host['username'] + '@' + esxi_host['ip'],
+                  password = esxi_host['password'], warn_only = True,
+                  shell = '/bin/sh -l -c'):
+        contrail_name = "opzoonvfw.vmdk"
+        esxi_vmdk = "%s/%s" %(esxi_host['datastore'],contrail_name)
+        print esxi_vmdk
+        esxi_vmdk_out = run("ls -l %s | awk \'{print $5}\'" %esxi_vmdk)
+        if esxi_vmdk_out.isdigit():
+            esxi_vmdk_len = int(esxi_vmdk_out)
+        else:
+            esxi_vmdk_len = 0
+
+        print "The length of vmdk in esxi:",esxi_vmdk_len
+        
+        if webui_vmdk_len == 0 and esxi_vmdk_len == 0:
+            print "magiccreate nonvmdkerror",vfw_name
+            return
+        elif esxi_vmdk_len == 0 and webui_vmdk_len != 0:
+            print "upload vmdk to esxi..."
+            put(webui_vmdk,esxi_vmdk)
+        elif esxi_vmdk_len != 0 and webui_vmdk_len == 0:
+            pass
+        elif esxi_vmdk_len != 0 and webui_vmdk_len != 0:
+            if esxi_vmdk_len == webui_vmdk_len:
+                print "vmdk len are the same."
+                pass
+            else:
+                print "upgrade vmdk..."
+                put(webui_vmdk,esxi_vmdk)
+
+        #if vfw_name vm existed, we would delete it.        
+        vmid = run("vim-cmd vmsvc/getallvms | grep ' %s ' | awk \'{print $1}\'" % vfw_name)
+        if vmid:
+            print "VM:%s have been spawn in ESXI:%s!" %(vfw_name, esxi_host['ip'])
+            print "magiccreate existerror",vfw_name
+            return 
+
+        #we will select datastore with maximum available disk.
+        "We select datastore:%s, Available:%d" %(maxds_name,maxds_size)
+        vm_store = maxds_path + vfw_name + '/'
+        run("rm -rf %s" %vm_store)
+        out = run("mkdir -p %s" % vm_store)
+        if out.failed:
+            raise Exception("Unable create %s on esxi host %s:%s" % (vm_store,
+                                     esxi_host['ip'], out))
+            return 
+        dst_vmx = vm_store + vfw_name + '.vmx'
+        out = put(vmx_file, dst_vmx)
+        os.remove(vmx_file)
+        if out.failed:
+            raise Exception("Unable to copy %s to %s on %s:%s" % (vmx_file,
+                                     vm_store, esxi_host['ip'], out))
+            return 
+        dst_vmdk = vm_store + vfw_name + '.vmdk'
+        out = run('vmkfstools -i "%s" -d zeroedthick "%s"' % (esxi_vmdk, dst_vmdk))
+        if out.failed:
+            print "magiccreate vmdkerror",vfw_name
+            return 
+
+    vm_path = '[' + maxds_name + ']' +  '/' + vfw_name + '/' + vfw_name + '.vmx'
+    reconnect_vc(vcontent,vcenter_user,vcenter_password) 
+    task = dc.vmFolder.RegisterVM_Task(vm_path,vfw_name, False,rp, host)
+    print "task.info.state:",task.info.state
+    sleep(5)
+    vcenter.wait_for_task(task, vcenter.service_instance)
+
+    print "task.info.state:",task.info.state
+    for i in (0,200):
+        myuuid =  task.info.result.summary.config.uuid
+        if myuuid != None:
+            break
+        sleep(1)
+    if myuuid == None:
+        print "magiccreate uuiderror"
+        return
+
+    name = vcenter_server['dv_switch']['dv_switch_name']
+     
+    try:
+        reconnect_vc(vcontent,vcenter_user,vcenter_password)
+        dvs = vcenter.get_obj([vcenter.pyVmomi.vim.DistributedVirtualSwitch], name)
+        devices = []
+        vm = None
+        container = vcontent.viewManager.CreateContainerView(vcontent.rootFolder, [vcenter.pyVmomi.vim.VirtualMachine], True)
+        for obj in container.view:
+            if obj.summary.config.uuid == myuuid:
+                vm = obj
+                break
+        if vm == None:
+            print "Can't get vm:%s from vcenter:%s" %(vfw_name, vcenter_server['server'])
+            deprov_vfw(vfw_name,vcenter_user,vcenter_password)
+            print "magiccreate busyerror",vfw_name
+            return
+        dv_port_name = ""           
+        
+        if vm.config == None:
+            print "error vm.config = None",vfw_name
+            deprov_vfw(vfw_name,vcenter_user,vcenter_password)
+            print "magiccreate busyerror",vfw_name
+            return
+    
+        for device in vm.config.hardware.device:
+            reconnect_vc(vcontent,vcenter_user,vcenter_password) 
+            if isinstance(device, vcenter.pyVmomi.vim.vm.device.VirtualEthernetCard):
+                if dv_port_name == "":
+                    dv_port_name = net1
+                elif dv_port_name == net1:
+                    dv_port_name = net2
+                else:
+                    dv_port_name = net3
+
+                nicspec = vcenter.pyVmomi.vim.vm.device.VirtualDeviceSpec()
+                nicspec.operation = vcenter.pyVmomi.vim.vm.device.VirtualDeviceSpec.Operation.edit
+                nicspec.device = device 
+                nicspec.device.wakeOnLanEnabled = True
+                pg_obj = vcenter.get_dvs_portgroup([vcenter.pyVmomi.vim.dvs.DistributedVirtualPortgroup], dv_port_name, name)
+                dvs_port_connection = vcenter.pyVmomi.vim.dvs.PortConnection()
+                dvs_port_connection.portgroupKey = pg_obj.key
+                dvs_port_connection.switchUuid = pg_obj.config.distributedVirtualSwitch.uuid
+                nicspec.device.backing = vcenter.pyVmomi.vim.vm.device.VirtualEthernetCard.DistributedVirtualPortBackingInfo()
+                nicspec.device.backing.port = dvs_port_connection
+                devices.append(nicspec)
+        vmconf = vcenter.pyVmomi.vim.vm.ConfigSpec(deviceChange=devices)
+        reconnect_vc(vcontent,vcenter_user,vcenter_password)
+        task = vm.ReconfigVM_Task(vmconf)
+        vcenter.wait_for_task(task, vcenter.service_instance)
+        print "Turning VM: %s On" %(vfw_name)
+        reconnect_vc(vcontent,vcenter_user,vcenter_password)
+
+        try:
+            task = vm.PowerOn()
+            vcenter.wait_for_task(task, vcenter.service_instance)
+        except Exception,e:
+            print "Got wait_for_task exception:",e
+            print "magiccreate resourceerror",vfw_name
+            #deprov_vfw(vfw_name,vcenter_user,vcenter_password)
+            return
+
+        print "Succesfully added  vfw:%s to the DV port group" %(vfw_name)
+        print "magiccreate success",vfw_name
+
+    except vcenter.pyVmomi.vmodl.MethodFault as error:
+        print "Caught vmodl fault : " + error.msg
+        return
+
+@task
+@roles('webui')
+def deprov_vfw(vfw_name,vcenter_user,vcenter_password):
+    
+    print "vfw_name:", vfw_name
+    print "user:",     vcenter_user
+    print "pwd:",      vcenter_password
+
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+    for v in vcenter_info.keys():
+        vcenter_server = vcenter_info[v]
+        break 
+  
+    vcenter_base_params = {}
+    vcenter_base_params['vcenter_server'] = vcenter_server['server']
+    vcenter_base_params['vcenter_username'] = vcenter_user
+    vcenter_base_params['vcenter_password'] = vcenter_password
+    vcenter = vcenter_base(vcenter_base_params)
+
+    try:
+        vcenter.connect_to_vcenter()
+    except Exception,e:
+        print "Got connect_to_vcenter exception:",e
+        print "magicdelete connecterror",vfw_name
+        return
+
+    vcontent = vcenter.service_instance.content
+    
+    for i in range(0,360):
+        excep = 0
+        try:
+            vm = vcenter.get_obj([vcenter.pyVmomi.vim.VirtualMachine], vfw_name)
+            excep = 0
+        except Exception,e:
+            print "Got get_obj exception:",e
+            excep = 1
+        if excep == 1:
+            sleep(1)
+            continue
+        else: 
+            break
+
+    if i >= 360:
+        print "magicdelete busyerror",vfw_name
+        return
+
+    if vm is None:
+        print "magicdelete notfound",vfw_name
+        return
+
+    if vm.runtime.powerState == "poweredOn":
+        print "Attempting to power off:%s" %vfw_name 
+        task = vm.PowerOffVM_Task()
+        vcenter.wait_for_task(task, vcenter.service_instance)
+    
+    task = vm.Destroy_Task()  
+ 
+    for i in range(0,10):
+        excep = 0
+        try:
+            vcenter.wait_for_task(task, vcenter.service_instance)
+            excep = 0
+        except Exception,e:
+            print "Got wait_for_task exception:",e
+            excep = 1
+        if excep == 1:
+            sleep(1)
+            continue
+        else: 
+            break
+
+    print "Successfully destroyed vfw:%s" %vfw_name
+   
+    if i < 10: 
+        print "magicdelete success",vfw_name
+    else:
+        print "magicdelete busyerror",vfw_name
+        return
+
+    return
+
+
+vfw_vmx_template = string.Template(
+'''.encoding = "UTF-8"
+config.version = "8"
+virtualHW.version = "$__hw_version__"
+vmci0.present = "TRUE"
+hpet0.present = "TRUE"
+nvram = "$__vm_name__.nvram"
+virtualHW.productCompatibility = "hosted"
+powerType.powerOff = "soft"
+powerType.powerOn = "hard"
+powerType.suspend = "hard"
+powerType.reset = "soft"
+displayName = "$__vm_name__"
+extendedConfigFile = "$__vm_name__.vmxf"
+floppy0.present = "FALSE"
+numvcpus = "$__numvcpus__"
+cpuid.coresPerSocket = "$__numvcpus__"
+scsi0.present = "TRUE"
+scsi0.sharedBus = "none"
+scsi0.virtualDev = "lsilogic"
+memsize = "$__memsize__"
+sched.mem.min = "$__memsize__"
+scsi0:0.present = "TRUE"
+scsi0:0.fileName = "$__vm_name__.vmdk"
+scsi0:0.deviceType = "scsi-hardDisk"
+chipset.onlineStandby = "FALSE"
+guestOS = "ubuntu-64"
+keyboard.typematicMinDelay = "2000000"
+tools.upgrade.policy = "upgradeatpowercycle"
+
+ethernet0.present = "TRUE"
+ethernet0.virtualDev = "vmxnet3"     
+ethernet0.networkName = "VM Network"
+ethernet0.addressType = "generated"
+
+ethernet1.present = "TRUE"
+ethernet1.virtualDev = "vmxnet3"
+ethernet1.networkName = "VM Network"
+ethernet1.addressType = "generated"
+
+ethernet2.present = "TRUE"
+ethernet2.virtualDev = "vmxnet3"
+ethernet2.networkName = "VM Network"
+ethernet2.addressType = "generated"
+
+pciBridge0.present = "TRUE"
+svga.present = "TRUE"
+pciBridge4.present = "TRUE"
+pciBridge4.virtualDev = "pcieRootPort"
+pciBridge4.functions = "8"
+pciBridge5.present = "TRUE"
+pciBridge5.virtualDev = "pcieRootPort"
+pciBridge5.functions = "8"
+pciBridge6.present = "TRUE"
+pciBridge6.virtualDev = "pcieRootPort"
+pciBridge6.functions = "8"
+pciBridge7.present = "TRUE"
+pciBridge7.virtualDev = "pcieRootPort"
+pciBridge7.functions = "8"
+sched.cpu.max = "$__cpumax__"
+sched.cpu.units = "mhz"
+sched.cpu.min = "0"
+sched.cpu.shares = "normal"
+sched.mem.shares = "normal"
+tools.syncTime = "FALSE"
+
+''')
+
+@task
+def verify_vcenter():
+
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+
+    for v in vcenter_info.keys():
+        vcenter_server = vcenter_info[v]
+        break
+
+    vcenter_base_params = {}
+    vcenter_base_params['vcenter_server'] = vcenter_server['server']
+    vcenter_base_params['vcenter_username'] = vcenter_server['username']
+    vcenter_base_params['vcenter_password'] = vcenter_server['password']
+    vcenter = vcenter_base(vcenter_base_params)
+
+    try:
+        vcenter.connect_to_vcenter()
+    except Exception,e:
+        print "%s connect error"  %vcenter_server['server']
+        return
+
+    print "Login %s successfully!" %vcenter_server['server']
+
+    vcontent = vcenter.service_instance.content
+
+    for dc in vcontent.rootFolder.childEntity:
+        if dc.name == vcenter_server['datacenter']:
+            print "DataCenter %s exists." %dc.name
+            break
+    if dc.name != vcenter_server['datacenter']:
+        print "DataCenter %s %s datacenter error" % (vcenter_server['datacenter'] , vcenter_server['server'])
+        #return
+
+    for cluster in dc.hostFolder.childEntity:
+        if cluster.name == vcenter_server['cluster'][0]:
+            print "Cluster %s exists" %cluster.name
+            break
+    if cluster.name != vcenter_server['cluster'][0]:
+        print "Cluster %s %s cluster error" % (  vcenter_server['cluster'][0] ,  vcenter_server['server'])
+        return
+
+    esxi_info = getattr(testbed, 'esxi_hosts', None)
+    esxi_host_list = esxi_info.keys()
+    for esxi_host in esxi_host_list:
+        if not ScaleESXi_CheckEnv(esxi_host):
+            return
+
+def ScaleESXi_CheckPara(esxi_host):
+    esxi_info = getattr(testbed, 'esxi_hosts', None)
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+    if not esxi_info.has_key(esxi_host):
+        print "SCALEESXI_NoEsxiInTestbed"
+        return False
+    print "ESXI        ip:",esxi_info[esxi_host]['ip']
+    print "ESXI datastore:",esxi_info[esxi_host]['datastore']
+    print "Target DataCenter:",vcenter_info[esxi_info[esxi_host]['vcenter_server']]['datacenter']
+    print "Target Cluster:",esxi_info[esxi_host]['cluster']
+    if vcenter_info[esxi_info[esxi_host]['vcenter_server']].has_key('dv_switch_fab'):
+        print "uplink-switch mode:","Distributed-vSwitch"
+        print "uplink-switch name:", vcenter_info[esxi_info[esxi_host]['vcenter_server']]['dv_switch_fab']
+ 
+    else:
+        print "uplink-switch mode:","Standard-vSwitch"
+        print "uplink-switch name:", esxi_info[esxi_host]['fabric_vswitch']
+    print "vRouter host:",esxi_info[esxi_host]['contrail_vm']['host']
+    print "vRouter eth0 mac:",esxi_info[esxi_host]['contrail_vm']['mac']
+    
+    return True
+
+def ScaleESXi_ModifyvCenter(esxi_host):
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+    esxi_info = getattr(testbed, 'esxi_hosts', None)
+
+    role_info = getattr(env, 'roledefs', None)
+    compute_list = role_info['compute']
+    password_list = getattr(env, 'passwords', None)
+    vcenter_server = vcenter_info[esxi_info[esxi_host]['vcenter_server']]
+
+    (hosts, clusters, vms) = get_esxi_vms_and_hosts(esxi_info, vcenter_server, (esxi_host,), \
+                                                    compute_list, password_list)
+    sleep(10)
+    provision_vcenter(vcenter_server, hosts, clusters, vms) 
+    sleep(10)
+    provision_vcenter_features(vcenter_server, esxi_info, (esxi_host,))
+    sleep(10)
+
+def ScaleESXi_ConfigvRouter(esxi_host):
+    esxi_info = getattr(testbed, 'esxi_hosts', None)
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+    vRouterHost = esxi_info[esxi_host]['contrail_vm']['host']
+    vRouterName = env.hostnames['all'][env.roledefs['all'].index(vRouterHost)]
+    webui_ip = env.roledefs['webui'][0].split('@')[1]
+
+    with settings(host_string = vRouterHost,warn_only = True):
+        cmd = "echo \"%s\" > /etc/hostname" % vRouterName
+        run(cmd)
+        
+        cmd = "sed -i '/127.0.0.1/d' /etc/hosts"
+        run(cmd)
+          
+        cmd = "echo \"127.0.0.1 localhost\"  | tee -a /etc/hosts"
+        run(cmd)
+
+        cmd = "echo \"127.0.0.1 %s\"  | tee -a /etc/hosts" %vRouterName
+        run(cmd)
+
+        cmd = " sed -i \"s/^physical_interface_mac.*/physical_interface_mac=%s/\" /etc/contrail/contrail-vrouter-agent.conf " % esxi_info[esxi_host]['contrail_vm']['mac'] 
+        run(cmd) 
+
+        cmd = "grep netmask /etc/network/interfaces  | awk '{print $2}' "
+        netmask = run(cmd)
+        exchange_mask = lambda mask: sum(bin(int(i)).count('1') \
+                                 for i in mask.split('.'))
+        vRouterIPAddr = esxi_info[esxi_host]['contrail_vm']['host'].split('@')[1]
+        vRouterIPMask = exchange_mask(netmask) 
+
+        cmd = " sed -i \"s/^control_network_ip.*/control_network_ip=%s/\" /etc/contrail/contrail-vrouter-agent.conf " % vRouterIPAddr 
+        run(cmd) 
+
+        cmd = " sed -i \"s/^ip=.*/ip=%s\\/%s/\" /etc/contrail/contrail-vrouter-agent.conf " % (vRouterIPAddr,vRouterIPMask) 
+        run(cmd) 
+
+        max_control_nodes = len(env.roledefs['control'])
+        cmd = " sed -i \"s/^max_control_nodes.*/max_control_nodes=%d/\" /etc/contrail/contrail-vrouter-agent.conf " % max_control_nodes 
+        run(cmd) 
+        
+        discovery_ip = env.roledefs['control'][0].split('@')[1]
+        cmd = " sed -i \"s/^server=.*/server=%s/\" /etc/contrail/contrail-vrouter-agent.conf " % discovery_ip 
+        run(cmd)
+
+        cmd = " sed -i \"s/^server=.*/server=%s/\" /etc/contrail/contrail-vrouter-nodemgr.conf " % discovery_ip 
+        run(cmd)
+
+        cmd = " sed -i \"s/^DISCOVERY=.*/DISCOVERY=%s/\" /etc/contrail/vrouter_nodemgr_param " % discovery_ip 
+        run(cmd)
+
+        cmd = "echo server %s | tee -a /etc/ntp.conf; " %webui_ip
+        run(cmd)
+        sleep(2)
+    
+        cfgm_ip = hstr_to_ip(get_control_host_string(env.roledefs['cfgm'][0]))    
+        cmd = "python /opt/contrail/utils/provision_vrouter.py --host_name %s --host_ip %s --api_server_ip %s  --oper add --admin_user None --admin_password None --admin_tenant_name admin --openstack_ip 127.0.0.1" % (vRouterName, vRouterIPAddr, cfgm_ip)
+        run(cmd)
+        sleep(5)
+         
+        cmd = " sed -i \"s/^command=.*/command=\\/usr\\/bin\\/contrail-vrouter-agent/\" /etc/contrail/supervisord_vrouter_files/contrail-vrouter-agent.ini "  
+        run(cmd)
+        sleep(2)          
+        
+        reboot_node('yes', vRouterHost)    
+        connections.clear()
+ 
+    return
+
+def ScaleESXi_ConfigController(esxi_host):
+    esxi_info = getattr(testbed, 'esxi_hosts', None)
+    vcenter_info = getattr(env, 'vcenter_servers', None)    
+    
+    ESXIIPAddr    = esxi_info[esxi_host]['ip']
+    vRouterIPAddr = esxi_info[esxi_host]['contrail_vm']['host'].split('@')[1]
+    for host_string in env.roledefs['control']:
+        with settings(host_string = host_string,warn_only = True):
+            put("/opt/contrail/utils/fabfile/testbeds/testbed.py", "/opt/contrail/utils/fabfile/testbeds/testbed.py", use_sudo=True)
+            cmd = "sed -i '/%s/d'  /etc/contrail/ESXiToVRouterIp.map " % ESXIIPAddr
+            run(cmd)
+            sleep(2)            
+            cmd = "echo '%s:%s' >> /etc/contrail/ESXiToVRouterIp.map" %(ESXIIPAddr, vRouterIPAddr)
+            run(cmd)
+            sleep(2)
+
+            run("service contrail-vcenter-plugin restart")
+            sleep(10)
+    return
+
+def ScaleESXi_ConfigWebUI(esxi_host):
+    esxi_info = getattr(testbed, 'esxi_hosts', None)
+
+    for host_string in env.roledefs['webui']:
+        with settings(host_string = host_string,warn_only = True):
+            put("/opt/contrail/utils/fabfile/testbeds/testbed.py", "/opt/contrail/utils/fabfile/testbeds/testbed.py", use_sudo=True) 
+            cmd = "cp -f /opt/contrail/utils/fabfile/testbeds/testbed.py    /usr/src/opcsec/contrail-web-core/src/serverroot/opcsec/.testbed.py"
+            run(cmd)
+            sleep(2)
+            cmd = "rm -f /root/secservice.info"
+            run(cmd)
+            sleep(2)
+            cmd = "service supervisor-webui restart"
+            run(cmd)
+            sleep(5)
+    return
+
+@task
+@roles('build')
+def ScaleESXi_ConfigHost(esxi_host):
+    print "Target ESXi in testbed:",esxi_host    
+    sleep(2)
+    if not ScaleESXi_CheckPara(esxi_host):
+        return
+
+    esxi_info    = getattr(testbed, 'esxi_hosts', None)
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+    vRouterIP    = esxi_info[esxi_host]['contrail_vm']['host'].split('@')[1]
+    vRouterHost  = esxi_info[esxi_host]['contrail_vm']['host']
+    vRouterName  = env.hostnames['all'][env.roledefs['all'].index(vRouterHost)]
+        
+    cmd = "echo \"%s %s\" | tee -a /etc/hosts" % (vRouterIP,vRouterName)
+    run(cmd)        
+
+    run("sed -i s/##.*$//g  /opt/contrail/utils/fabfile/testbeds/testbed.py")
+    ScaleESXi_ConfigvRouter(esxi_host)
+    ScaleESXi_ConfigController(esxi_host)
+    ScaleESXi_ConfigWebUI(esxi_host)
+
+    execute('verify_database')
+    execute('verify_cfgm')
+    execute('verify_control')
+    execute('verify_collector')
+    execute('verify_webui')
+    #execute('verify_compute')
+
+    return
+
+def ScaleESXi_CheckEnv(esxi_host):
+    esxi_info = getattr(testbed, 'esxi_hosts', None)
+    vcenter_info = getattr(env, 'vcenter_servers', None)  
+    vcenter_base_params = {}
+    vcenter_base_params['vcenter_server'] = vcenter_info[esxi_info[esxi_host]["vcenter_server"]]['server']
+    vcenter_base_params['vcenter_username'] = vcenter_info[esxi_info[esxi_host]["vcenter_server"]]['username']
+    vcenter_base_params['vcenter_password'] = vcenter_info[esxi_info[esxi_host]["vcenter_server"]]['password']
+    vcenter = vcenter_base(vcenter_base_params)
+    try:
+        vcenter.connect_to_vcenter()
+    except Exception,e:
+        print "Got connect_to_vcenter exception:",e
+        print "Exception: connect error vcenter %s not found" % vcenter_base_params['vcenter_server']
+        return
+
+    vcontent = vcenter.service_instance.content
+    for dc in vcontent.rootFolder.childEntity:
+        if dc.name == vcenter_info[esxi_info[esxi_host]["vcenter_server"]]['datacenter']:
+            break
+   
+    clusterNotFound = False
+    for cluster in dc.hostFolder.childEntity:
+        if cluster.name == esxi_info[esxi_host]['cluster']:
+            clusterNotFound = True
+            break
+    if clusterNotFound == False:
+        print "clusterNotFound:%s " % esxi_info[esxi_host]['cluster'] 
+        return   
+   
+    ESXiNotFound = False
+    for host in cluster.host:
+        if host.name == esxi_info[esxi_host]['ip']:
+            ESXiNotFound = True
+            break
+    if ESXiNotFound == False:
+        print "ESXiNotFound, ESXi:%s,cluster:%s " % (esxi_info[esxi_host]['ip'],esxi_info[esxi_host]['cluster']) 
+        print  esxi_info[esxi_host]['ip'] , "cluster error"
+        return
+    if vcenter_info[esxi_info[esxi_host]['vcenter_server']].has_key('dv_switch_fab'):
+        dvs_name = vcenter_info[esxi_info[esxi_host]["vcenter_server"]]["dv_switch_fab"]["dv_switch_name"]
+        dvs = vcenter.get_obj([vcenter.pyVmomi.vim.DistributedVirtualSwitch], dvs_name)
+        if dvs is None:
+            print "Exception: connect error distributed switch %s not found" %dvs_name
+            return False
+
+        hostInDVS = False
+        for host in dvs.summary.hostMember:
+            hostInDVS = (host.name == esxi_info[esxi_host]['ip'])
+            if hostInDVS:
+                break
+        if not hostInDVS:
+            print  "Exception: ESXi(" ,  esxi_info[esxi_host]['ip'] , ") not found in distributed switch"
+            return False
+
+    else:
+        print "uplink-switch mode:","Standard-vSwitch"
+        print "uplink-switch name:", esxi_info[esxi_host]['fabric_vswitch']
+
+    return True 
+@task
+@roles('build')
+def ScaleESXi_PlusHost(esxi_host):
+    print "Target ESXi in testbed:",esxi_host    
+    esxi_info = getattr(testbed, 'esxi_hosts', None)
+    vcenter_info = getattr(env, 'vcenter_servers', None)  
+	
+    if not os.path.exists('/root/vRouterScale.vmdk'):
+          print "Fatal error: vmdk file is NOT exist for extend install"
+          return False
+
+    print "Target ESXi Server:",esxi_info[esxi_host]
+    print "Target vCenter:",vcenter_info[esxi_info[esxi_host]["vcenter_server"]]
+    if not ScaleESXi_CheckEnv(esxi_host):
+        return
+ 
+    prov_esxi(esxi_host)
+    sleep(5)
+    ScaleESXi_ModifyvCenter(esxi_host)
+    sleep(5)
+    renamevrouter()
+    sleep(2)
+    print "ScaleESXi_PlusHost %s finish" %esxi_info[esxi_host]['ip']
+
+
+
+@task
+@roles('webui')
+def Update_vFW(hostip,vFW_name):
+
+    print "hostip:",hostip
+    print "vFW_name:",vFW_name
+
+    hostuser = "admin"
+    password = "admin"
+
+    ssh_port = 22        #ssh端口固定�?2
+    timeout  = 5         #socket超时时间�?�?    try_times = 3        #网络连接重试次数
+
+    vcenter_info = getattr(env, 'vcenter_servers', None)
+    for v in vcenter_info.keys():
+        vcenter_server = vcenter_info[v]
+        break
+
+    vcenter_user     = vcenter_server['username']
+    vcenter_password = vcenter_server['password']
+
+
+    while True:
+        try:
+            ssh_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            ssh_sock.settimeout(90)  #每次超时90s,共三次，�?分钟总超时时�?            ssh_sock.connect((hostip, int(ssh_port)))
+            t = paramiko.Transport(sock=ssh_sock)
+            t.connect(username=hostuser,password=password)
+            chan = t.open_session()
+            chan.settimeout(timeout)
+            chan.get_pty()
+            chan.invoke_shell()
+            print u'连接%s成功' % hostip
+            break
+        except Exception, e:
+            if try_times != 0:
+                print u'连接%s失败，进行重�? %hostip
+                print "exception:",e
+                try_times -= 1
+            else:
+                print u'重试%s次失败，结束程序' %try_times
+                return
+
+    cmd = 'enable \r'   #enable命令,进入privileged mode
+    chan.send(cmd)
+    ret = chan.recv(65535)
+    print "enable:",ret
+
+    webui_ip = env.roledefs['webui'][0].split("@")[1]
+    cmd = 'copy ftp sunya sunya  %s cloudsec_vfw.rom version \r' %webui_ip
+
+    chan.send(cmd)
+    
+    temps = 1
+    while True:
+        if temps > 60:  #总超时时间是60*timeout   
+            print "执行升级命令超时" 
+            break
+        try:
+            ret = chan.recv(65535)
+        except Exception, e1:
+            print "cexception:",e1 
+            continue
+        print "copy:",ret
+        if "success" in ret:
+            print " magicupdate "
+            reboot_vfw(vFW_name,vcenter_user,vcenter_password)
+            break
+        print "Wait %s second" %(temps*timeout)
+        sleep(1)
+        temps += 1
+
+    chan.close()
+    t.close()
+    return
